@@ -25,6 +25,7 @@ def get_columns(conn):
       ON c.table_name = t.table_name
     WHERE c.table_schema = 'public'
       AND t.table_type = 'BASE TABLE'
+      AND t.table_name NOT IN ('dq_rules', 'dq_profiles', 'dq_rules_proposed', 'dq_violations')
     ORDER BY c.table_name, c.column_name
     """
 
@@ -318,16 +319,15 @@ def lambda_handler(event, context):
                         json.dumps(samples)
                     )
                 )
+                conn.commit()
 
             except Exception as e:
 
                 print(
                     f"Skipping {table}.{column}: {e}"
                 )
-
+                conn.rollback()
                 continue
-
-        conn.commit()
 
         return {
             "statusCode": 200,
