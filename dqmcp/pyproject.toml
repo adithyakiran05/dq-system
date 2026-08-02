@@ -1,0 +1,10 @@
+[project]
+name = "dqmcp"
+version = "0.1.0"
+description = "DQ MCP Server"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=0.1.0",
+    "pg8000>=1.31.0",
+]
