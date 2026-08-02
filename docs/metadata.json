@@ -1,0 +1,6 @@
+{
+  "name": "DQ Agent Documentation & Architecture Suite",
+  "description": "High-fidelity interactive architecture, documentation, and simulation suite for the AI-Driven Data Quality (DQ) Agent system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

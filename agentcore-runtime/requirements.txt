@@ -1,0 +1,6 @@
+groq
+mcp
+fastapi
+uvicorn
+pg8000
+python-dotenv

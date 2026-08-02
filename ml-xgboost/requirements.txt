@@ -1,0 +1,10 @@
+boto3
+fastmcp
+pg8000
+python-dotenv
+numpy
+pandas
+scikit-learn
+xgboost
+groq
+httpx
