@@ -7,8 +7,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('All');
 
-  const fetchRules = async () => {
-    setLoading(true);
+  const fetchRules = async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const res = await fetch('/api/rules');
       const data = await res.json();
@@ -16,12 +16,19 @@ export default function Home() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchRules();
+    
+    // Poll every 5 seconds for real-time updates from AgentCore
+    const interval = setInterval(() => {
+      fetchRules(true);
+    }, 5000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleGenerate = async () => {
