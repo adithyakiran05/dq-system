@@ -1,43 +1,41 @@
 import json
-import urllib.request
-import os
+import boto3
 
 def lambda_handler(event, context):
-    agentcore_url = os.environ.get("AGENTCORE_URL")
-    
-    if not agentcore_url:
-        return {
-            'statusCode': 500,
-            'body': json.dumps('AGENTCORE_URL environment variable is missing!')
-        }
-    
-    # Ensure the URL points to /invocations
-    if not agentcore_url.endswith("/invocations"):
-        agentcore_url = agentcore_url.rstrip("/") + "/invocations"
-        
+    print("Executing Simple Agent Trigger...")
     try:
-        # Make a POST request to the AgentCore runtime
-        req = urllib.request.Request(
-            agentcore_url,
-            data=json.dumps({}).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
+        client = boto3.client('bedrock-agentcore', region_name='us-east-1')
+        agent_arn = "arn:aws:bedrock-agentcore:us-east-1:413612133806:runtime/dq_agent-VW5g8m2yNy"
+        
+        # We pass the payload instructing the agent to start generating rules
+        response = client.invoke_agent_runtime(
+            agentRuntimeArn=agent_arn,
+            payload=json.dumps({"action": "generate_rules"})
         )
         
-        with urllib.request.urlopen(req, timeout=10) as response:
-            response_body = response.read().decode('utf-8')
-            
+        # Read and parse the stream response from the AWS client
+        parsed_response = json.loads(response['response'].read())
+        
         return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Successfully triggered AgentCore!',
-                'agent_response': json.loads(response_body) if response_body else None
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+                "Access-Control-Allow-Headers": "Content-Type"
+            },
+            "body": json.dumps({
+                "status": "success",
+                "agent_response": parsed_response
             })
         }
-        
     except Exception as e:
-        print(f"Error triggering AgentCore: {str(e)}")
+        print(f"Error triggering AgentCore: {e}")
         return {
-            'statusCode': 500,
-            'body': json.dumps(f"Failed to trigger AgentCore: {str(e)}")
+            "statusCode": 500,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+                "Access-Control-Allow-Headers": "Content-Type"
+            },
+            "body": json.dumps({"status": "error", "message": str(e)})
         }

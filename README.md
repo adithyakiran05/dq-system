@@ -51,9 +51,12 @@ Add the following key-value pairs in the AgentCore runtime configuration so the 
 - `DB_USER`: Your database username
 - `DB_PASSWORD`: Your database password
 
-### 4. Invoking the Agent
-When testing in the AWS console or invoking via your frontend/EventBridge, the expected invocation route is:
-```text
-POST /invocations
-```
+### 4. The Trigger Architecture (Frontend to AgentCore)
+To allow the Next.js frontend to securely trigger the AgentCore runtime without exposing AWS credentials, we use a lightweight Lambda function (`lambda-agent-trigger/lambda_function.py`) as a secure bridge.
+
+1. **Frontend:** Hits an AWS API Gateway endpoint (`NEXT_PUBLIC_TRIGGER_API_URL` in `.env.local`).
+2. **API Gateway:** Routes the request to the `dq-agent-trigger` Lambda function.
+3. **Lambda Trigger:** Uses the `boto3` SDK to assume its IAM role and invoke the Bedrock AgentCore runtime securely, bypassing complex Signature V4 authentication requirements.
+4. **AgentCore:** Wakes up the `dqagent` runtime container via the `POST /invocations` route.
+
 *Note: The agent does not require a specific JSON payload or prompt to be passed in the body. Upon receiving a POST request, it automatically retrieves profiles from the DB and generates rules.*

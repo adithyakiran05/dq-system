@@ -1,0 +1,13 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "bedrock-agentcore:InvokeAgentRuntime",
+            "Resource": [
+                "arn:aws:bedrock-agentcore:us-east-1:413612133806:runtime/dq_agent-VW5g8m2yNy",
+                "arn:aws:bedrock-agentcore:us-east-1:413612133806:runtime/dq_agent-VW5g8m2yNy/*"
+            ]
+        }
+    ]
+}
