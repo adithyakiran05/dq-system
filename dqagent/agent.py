@@ -2,22 +2,23 @@ import os
 import json
 import uvicorn
 import time
-import threading
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from groq import Groq
+import httpx
 import mcp_server
 
 app = FastAPI(title="DQ Agent Runtime")
 
-@app.get("/health")
-async def health():
+@app.get("/ping")
+async def ping():
     return {"status": "ok"}
 
 def process_profiles_background(profiles_list, system_prompt):
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    http_client = httpx.Client(verify=False)
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"), http_client=http_client)
     
-    # Batch the profiles into chunks of 3 to speed up processing while staying under TPM
-    chunk_size = 3
+    # Batch the profiles into chunks of 7 to speed up processing
+    chunk_size = 7
     batches = [profiles_list[i:i + chunk_size] for i in range(0, len(profiles_list), chunk_size)]
     
     for batch in batches:
@@ -27,7 +28,7 @@ def process_profiles_background(profiles_list, system_prompt):
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(batch)}
                 ],
-                model="llama-3.1-8b-instant",  # Updated to supported model
+                model="llama-3.1-8b-instant",
                 temperature=0.1,
             )
             
@@ -49,37 +50,60 @@ def process_profiles_background(profiles_list, system_prompt):
                         continue
                         
                     rt = rule.get('rule_type')
-                    dt = profile.get('data_type', '').lower()
                     
-                    # Removed basic validation logic to allow rules for all columns
+                    dt = profile.get('data_type', '').lower()
+                    col_name = rule['column_name'].lower()
+                    
+                    # 1. Reject 'not_null' if the column is already > 5% null
+                    if rt == 'not_null' and profile.get('null_rate', 0) > 0.05:
+                        continue
+                        
+                    # 2. Reject 'unique' if the column is < 95% unique
+                    if rt == 'unique' and profile.get('distinct_rate', 0) < 0.95:
+                        continue
+                        
+                    # 3. If accepted_values, ensure the LLM didn't hallucinate random arrays
+                    if rt == 'accepted_values':
+                        config_vals = rule.get('rule_config', {}).get('values', [])
+                        if config_vals == ["1", "2", "3", "4", "5"]:
+                            continue
+                        if 'char' in dt or 'text' in dt:
+                            continue
+                            
+                    # 4. Reject 'unique' for dates/timestamps
+                    if rt == 'unique' and ('date' in dt or 'time' in dt):
+                        continue
+                        
+                    # 5. Handle phone numbers/emails dynamically via regex_match
+                    if rt == 'regex_match':
+                        if not rule.get('rule_config', {}).get('regex'):
+                            continue
+                        
                     valid_rules.append(rule)
                     
                 # Save only the validated rules
                 if valid_rules:
-                    print(f"Saving {len(valid_rules)} rules to DB...")
                     mcp_server.save_rules_bulk(json.dumps(valid_rules))
                     
             except json.JSONDecodeError:
-                print("Failed to decode JSON from LLM:\n", generated_rules_json)
+                print("Failed to decode JSON from LLM")
             
         except Exception as e:
             print(f"Error processing batch: {e}")
             
-        # Free tier is 30 RPM and 7,000 TPM. 
-        # Each batch uses ~650 tokens. 7000 / 650 = ~10 requests per minute max.
-        # Sleeping for 6.5 seconds ensures we make ~9 requests per minute (~5850 TPM), avoiding all rate limits.
-        time.sleep(6.5)
+        # Add a 1.5 second sleep as requested by the user
+        time.sleep(1.5)
 
 
 @app.post("/invocations")
-async def generate_rules():
+async def generate_rules(background_tasks: BackgroundTasks):
     try:
         # 1. Fetch Profiles Natively
         profiles_json = mcp_server.get_profiles()
         all_profiles = json.loads(profiles_json)
         
         # Filter out DQ system tables
-        ignore_tables = {"dq_rules", "dq_profiles", "dq_violations", "dq_rules_proposed"}
+        ignore_tables = {"dq_rules", "dq_profiles", "dq_violations"}
         profiles_list = [p for p in all_profiles if p.get("table_name") not in ignore_tables]
         
         # 2. Prepare the Agent's System Prompt
@@ -87,9 +111,10 @@ async def generate_rules():
         You are an expert Data Quality Engineer. Analyze the database profiles and generate comprehensive data quality rules covering the 6 core dimensions of Data Quality: Completeness, Uniqueness, Validity, Accuracy, Consistency, and Timeliness.
         
         CRITICAL INSTRUCTIONS:
-        1. ONLY use these rule_type values: "not_null", "unique", "min_value", "max_value", "accepted_values", "regex_match", "min_length", "max_length", "freshness", "none".
-        2. If a column is messy and no rules apply, use rule_type "none".
-        3. "rule_config" formats:
+        1. ONLY use these rule_type values: "not_null", "unique", "min_value", "max_value", "accepted_values", "regex_match", "min_length", "max_length", "freshness".
+        2. Do NOT generate a "unique" rule if the distinct_rate is less than 1.0.
+        3. Do NOT generate a "not_null" rule if the null_rate is significantly greater than 0.
+        4. "rule_config" formats:
            - min/max_value: {"min_value": X} or {"max_value": Y}
            - accepted_values: {"values": ["A", "B"]}
            - regex_match: {"regex": "^[a-z]+$"}
@@ -118,9 +143,8 @@ async def generate_rules():
         Do not include any markdown formatting or explanations. Just the JSON array.
         """
         
-        # 3. Offload the heavy generation loop to a Background Thread to instantly return to AWS!
-        thread = threading.Thread(target=process_profiles_background, args=(profiles_list, system_prompt))
-        thread.start()
+        # 3. Offload the heavy generation loop to a Background Task to instantly return to AWS!
+        background_tasks.add_task(process_profiles_background, profiles_list, system_prompt)
         
         return {
             "status": "success", 
@@ -134,6 +158,7 @@ async def generate_rules():
             "message": str(e),
             "traceback": traceback.format_exc()
         }
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
