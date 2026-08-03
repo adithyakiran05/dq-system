@@ -51,14 +51,7 @@ def process_profiles_background(profiles_list, system_prompt):
                     rt = rule.get('rule_type')
                     dt = profile.get('data_type', '').lower()
                     
-                    # Basic validation logic
-                    if rt == 'not_null' and profile.get('null_rate', 0) > 0.05:
-                        continue
-                    if rt == 'unique' and profile.get('distinct_rate', 0) < 0.95:
-                        continue
-                    if rt == 'unique' and ('date' in dt or 'time' in dt):
-                        continue
-                        
+                    # Removed basic validation logic to allow rules for all columns
                     valid_rules.append(rule)
                     
                 # Save only the validated rules
@@ -72,8 +65,10 @@ def process_profiles_background(profiles_list, system_prompt):
         except Exception as e:
             print(f"Error processing batch: {e}")
             
-        # Add a sleep to ensure we don't hit Groq's RPM limits
-        time.sleep(1.5)
+        # Free tier is 30 RPM and 7,000 TPM. 
+        # Each batch uses ~650 tokens. 7000 / 650 = ~10 requests per minute max.
+        # Sleeping for 6.5 seconds ensures we make ~9 requests per minute (~5850 TPM), avoiding all rate limits.
+        time.sleep(6.5)
 
 
 @app.post("/invocations")
@@ -92,10 +87,9 @@ async def generate_rules():
         You are an expert Data Quality Engineer. Analyze the database profiles and generate comprehensive data quality rules covering the 6 core dimensions of Data Quality: Completeness, Uniqueness, Validity, Accuracy, Consistency, and Timeliness.
         
         CRITICAL INSTRUCTIONS:
-        1. ONLY use these rule_type values: "not_null", "unique", "min_value", "max_value", "accepted_values", "regex_match", "min_length", "max_length", "freshness".
-        2. Do NOT generate a "unique" rule if the distinct_rate is less than 1.0.
-        3. Do NOT generate a "not_null" rule if the null_rate is significantly greater than 0.
-        4. "rule_config" formats:
+        1. ONLY use these rule_type values: "not_null", "unique", "min_value", "max_value", "accepted_values", "regex_match", "min_length", "max_length", "freshness", "none".
+        2. If a column is messy and no rules apply, use rule_type "none".
+        3. "rule_config" formats:
            - min/max_value: {"min_value": X} or {"max_value": Y}
            - accepted_values: {"values": ["A", "B"]}
            - regex_match: {"regex": "^[a-z]+$"}
