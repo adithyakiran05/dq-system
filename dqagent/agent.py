@@ -13,86 +13,104 @@ app = FastAPI(title="DQ Agent Runtime")
 async def ping():
     return {"status": "ok"}
 
+@app.post("/configs")
+async def save_config(request: Request):
+    try:
+        body = await request.json()
+        config_text = body.get("config_text", "")
+        mcp_server.save_custom_config(config_text)
+        return {"status": "success", "message": "Config saved"}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e), "traceback": traceback.format_exc()}
+
 def process_profiles_background(profiles_list, system_prompt):
     http_client = httpx.Client(verify=False)
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"), http_client=http_client)
     
-    # Batch the profiles into chunks of 7 to speed up processing
-    chunk_size = 7
+    # Batch the profiles into chunks of 6
+    chunk_size = 6
     batches = [profiles_list[i:i + chunk_size] for i in range(0, len(profiles_list), chunk_size)]
     
     for batch in batches:
-        try:
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(batch)}
-                ],
-                model="llama-3.1-8b-instant",
-                temperature=0.1,
-            )
-            
-            generated_rules_json = chat_completion.choices[0].message.content
-            
-            # Clean up any potential markdown formatting the LLM might add
-            if generated_rules_json.startswith("```"):
-                generated_rules_json = generated_rules_json.strip('`').replace('json\n', '').strip()
-                
+        retries = 3
+        while retries > 0:
             try:
-                raw_rules = json.loads(generated_rules_json)
-                valid_rules = []
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(batch)}
+                    ],
+                    model="llama-3.1-8b-instant",
+                    temperature=0.1,
+                )
                 
-                for rule in raw_rules:
-                    # Find the corresponding profile data to cross-check the LLM's logic
-                    profile = next((p for p in batch if p['table_name'] == rule['table_name'] and p['column_name'] == rule['column_name']), None)
+                generated_rules_json = chat_completion.choices[0].message.content
+                
+                # Clean up any potential markdown formatting the LLM might add
+                if generated_rules_json.startswith("```"):
+                    generated_rules_json = generated_rules_json.strip('`').replace('json\n', '').strip()
                     
-                    if not profile:
-                        continue
-                        
-                    rt = rule.get('rule_type')
+                try:
+                    raw_rules = json.loads(generated_rules_json)
+                    valid_rules = []
                     
-                    dt = profile.get('data_type', '').lower()
-                    col_name = rule['column_name'].lower()
-                    
-                    # 1. Reject 'not_null' if the column is already > 5% null
-                    if rt == 'not_null' and profile.get('null_rate', 0) > 0.05:
-                        continue
+                    for rule in raw_rules:
+                        # Find the corresponding profile data to cross-check the LLM's logic
+                        profile = next((p for p in batch if p['table_name'] == rule['table_name'] and p['column_name'] == rule['column_name']), None)
                         
-                    # 2. Reject 'unique' if the column is < 95% unique
-                    if rt == 'unique' and profile.get('distinct_rate', 0) < 0.95:
-                        continue
-                        
-                    # 3. If accepted_values, ensure the LLM didn't hallucinate random arrays
-                    if rt == 'accepted_values':
-                        config_vals = rule.get('rule_config', {}).get('values', [])
-                        if config_vals == ["1", "2", "3", "4", "5"]:
-                            continue
-                        if 'char' in dt or 'text' in dt:
+                        if not profile:
                             continue
                             
-                    # 4. Reject 'unique' for dates/timestamps
-                    if rt == 'unique' and ('date' in dt or 'time' in dt):
-                        continue
+                        rt = rule.get('rule_type')
                         
-                    # 5. Handle phone numbers/emails dynamically via regex_match
-                    if rt == 'regex_match':
-                        if not rule.get('rule_config', {}).get('regex'):
+                        dt = profile.get('data_type', '').lower()
+                        col_name = rule['column_name'].lower()
+                        
+                        # 1. Reject 'not_null' if the column is already > 5% null
+                        if rt == 'not_null' and profile.get('null_rate', 0) > 0.05:
                             continue
+                            
+                        # 2. Reject 'unique' if the column is < 95% unique
+                        if rt == 'unique' and profile.get('distinct_rate', 0) < 0.95:
+                            continue
+                            
+                        # 3. If accepted_values, ensure the LLM didn't hallucinate random arrays
+                        if rt == 'accepted_values':
+                            config_vals = rule.get('rule_config', {}).get('values', [])
+                            if config_vals == ["1", "2", "3", "4", "5"]:
+                                continue
+                                
+                        # 4. Reject 'unique' for dates/timestamps
+                        if rt == 'unique' and ('date' in dt or 'time' in dt):
+                            continue
+                            
+                        # 5. Handle phone numbers/emails dynamically via regex_match
+                        if rt == 'regex_match':
+                            if not rule.get('rule_config', {}).get('regex'):
+                                continue
+                            
+                        valid_rules.append(rule)
                         
-                    valid_rules.append(rule)
-                    
-                # Save only the validated rules
-                if valid_rules:
-                    mcp_server.save_rules_bulk(json.dumps(valid_rules))
-                    
-            except json.JSONDecodeError:
-                print("Failed to decode JSON from LLM")
+                    # Save only the validated rules
+                    if valid_rules:
+                        mcp_server.save_rules_bulk(json.dumps(valid_rules))
+                        
+                except json.JSONDecodeError:
+                    print("Failed to decode JSON from LLM")
+                
+                # Successfully processed, break out of retry loop
+                break
+                
+            except Exception as e:
+                print(f"Error processing batch: {e}")
+                retries -= 1
+                if retries > 0:
+                    print(f"Retrying batch in 15 seconds... ({retries} retries left)")
+                    time.sleep(15)
             
-        except Exception as e:
-            print(f"Error processing batch: {e}")
-            
-        # Add a 1.5 second sleep as requested by the user
-        time.sleep(1.5)
+        # Sleep for 2.5 seconds as requested by the user
+        time.sleep(2.5)
 
 
 @app.post("/invocations")
@@ -141,6 +159,18 @@ async def generate_rules(background_tasks: BackgroundTasks):
           }
         ]
         Do not include any markdown formatting or explanations. Just the JSON array.
+        """
+        
+        # Inject custom user configurations if they exist
+        custom_config = mcp_server.get_all_configs_text()
+        if custom_config and custom_config.strip():
+            system_prompt += f"""
+        
+        CRITICAL BUSINESS CONSTRAINTS TO ENFORCE:
+        {custom_config.strip()}
+        
+        When generating rules, ensure your `rule_config` (like regex, min_value, or max_value) 
+        strictly adheres to the business constraints provided above.
         """
         
         # 3. Offload the heavy generation loop to a Background Task to instantly return to AWS!

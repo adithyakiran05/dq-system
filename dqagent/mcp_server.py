@@ -31,6 +31,13 @@ def init_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS dq_custom_configs (
+            id SERIAL PRIMARY KEY,
+            config_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -196,3 +203,28 @@ def save_rules_bulk(rules_json: str):
     conn.commit()
     conn.close()
     return f"Inserted {inserted} rules"
+
+def save_custom_config(config_text: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO dq_custom_configs (config_text)
+        VALUES (%s)
+    """, (config_text,))
+    conn.commit()
+    conn.close()
+    return "saved"
+
+def get_all_configs_text():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT config_text 
+        FROM dq_custom_configs 
+        ORDER BY created_at ASC 
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    if rows:
+        return "\n\n---\n\n".join([r[0] for r in rows])
+    return ""

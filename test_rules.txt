@@ -1,0 +1,5 @@
+1. All email addresses must end with @acme.com or @acmecorp.com.
+2. The user_age column should never exceed 120 and must be at least 18.
+3. SSN must always be formatted as XXX-XX-XXXX.
+4. Any timestamp column should default to the UTC timezone.
+5. If country is "US", the state column cannot be null.
