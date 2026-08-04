@@ -5,11 +5,23 @@ This repository contains a full-stack, AI-augmented Data Quality Automation Pipe
 
 ## Architecture Components
 
-1. **Frontend (`frontend/`)**: A Next.js/React web application that visualizes the data quality metrics, displays proposed rules, and highlights data violations.
+1. **Frontend (`frontend/`)**: A Next.js/React web application that visualizes the data quality metrics, displays proposed rules, and highlights data violations. It also includes an interface for managing **Custom Configurations**.
 2. **Lambda Profiler (`lambda-profiler/`)**: An AWS Lambda function that scans your PostgreSQL database to generate statistical profiles (null rates, distinct counts, max/min values, etc.) and saves them to the `dq_profiles` table.
 3. **Lambda Checker (`lambda-checker/`)**: An AWS Lambda function that validates actual database data against the accepted rules to find anomalies.
-4. **Machine Learning Pipelines (`ml-randomforest/`, `ml-xgboost/`)**: ML models that detect complex anomalies based on historical profiling data.
-5. **DQ Agent (`dqagent/`)**: A containerized LLM Agent service (powered by Groq / Llama 3) that reads database profiles and automatically generates natural-language driven rules, saving them as proposals to the `dq_rules_proposed` table.
+4. **Lambda Config Processor (`lambda-config-processor/`)**: An AWS Lambda function triggered by S3 uploads. It parses uploaded custom configuration files (like PDF and TXT), extracts the raw text, and stores it in the `dq_custom_configs` table in RDS.
+5. **Machine Learning Pipelines (`ml-randomforest/`, `ml-xgboost/`)**: ML models that detect complex anomalies based on historical profiling data.
+6. **DQ Agent (`dqagent/`)**: A containerized LLM Agent service (powered by Groq / Llama 3) that reads database profiles, injects any active **Custom Configurations** into its system prompt, and automatically generates natural-language driven rules, saving them as proposals to the `dq_rules_proposed` table.
+
+---
+
+## The Custom Configurations Pipeline
+
+To ensure the AI generates rules that strictly align with domain-specific business constraints (e.g., "All shipping IDs must be 10 characters long"), users can upload custom configurations through the frontend.
+
+1. **Uploads**: The Next.js frontend uses AWS pre-signed URLs to upload PDF or TXT files directly to an S3 bucket (`dq-custom-configs-bucket-1696417599`).
+2. **Processing**: S3 triggers the `lambda-config-processor`, running Python 3.12. It extracts the raw text from the files using PyPDF2 or plain text decoders and inserts it into the `dq_custom_configs` RDS table via `pg8000`.
+3. **Agent Integration**: When the `dqagent` runs, it dynamically fetches all active configurations from the `dq_custom_configs` table, concatenates them, and injects them directly into the agent's system prompt to enforce strict business logic during generation.
+4. **Management UI**: Users can view and delete active configurations directly from the frontend via Next.js API routes (`/api/configs/list` and `/api/configs/delete`), reusing the same RDS connection pool as the rule management system.
 
 ---
 
@@ -59,4 +71,4 @@ To allow the Next.js frontend to securely trigger the AgentCore runtime without 
 3. **Lambda Trigger:** Uses the `boto3` SDK to assume its IAM role and invoke the Bedrock AgentCore runtime securely, bypassing complex Signature V4 authentication requirements.
 4. **AgentCore:** Wakes up the `dqagent` runtime container via the `POST /invocations` route.
 
-*Note: The agent does not require a specific JSON payload or prompt to be passed in the body. Upon receiving a POST request, it automatically retrieves profiles from the DB and generates rules.*
+*Note: The agent processes profiles in optimized chunk sizes (e.g., batches of 6) and includes an exponential backoff retry mechanism (15-second pauses) to avoid strict Tokens-Per-Minute rate limits on the Groq LLM API caused by the massive custom configurations payloads.*
