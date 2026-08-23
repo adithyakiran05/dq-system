@@ -71,7 +71,7 @@ def process_profiles_background(profiles_list, system_prompt):
                         if rt == 'not_null' and profile.get('null_rate', 0) > 0.05:
                             continue
                             
-                        # 2. Reject 'unique' if the column is < 95% unique
+                        # 2. Reject 'unique' if the column is < 95% unique (we allow 95%+ so we can catch existing duplicate violations)
                         if rt == 'unique' and profile.get('distinct_rate', 0) < 0.95:
                             continue
                             
@@ -130,7 +130,7 @@ async def generate_rules(background_tasks: BackgroundTasks):
         
         CRITICAL INSTRUCTIONS:
         1. ONLY use these rule_type values: "not_null", "unique", "min_value", "max_value", "accepted_values", "regex_match", "min_length", "max_length", "freshness".
-        2. Do NOT generate a "unique" rule if the distinct_rate is less than 1.0.
+        2. Do NOT generate a "unique" rule if the distinct_rate is less than 0.95 (columns with >= 95% uniqueness are likely meant to be unique IDs).
         3. Do NOT generate a "not_null" rule if the null_rate is significantly greater than 0.
         4. "rule_config" formats:
            - min/max_value: {"min_value": X} or {"max_value": Y}
