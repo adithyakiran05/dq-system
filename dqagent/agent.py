@@ -41,7 +41,7 @@ def process_profiles_background(profiles_list, system_prompt):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": json.dumps(batch)}
                     ],
-                    model="llama-3.1-8b-instant",
+                    model="qwen/qwen3.8-27b",
                     temperature=0.1,
                 )
                 
