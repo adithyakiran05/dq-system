@@ -1,6 +1,9 @@
 import os
 import json
 import pg8000
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # We don't use mcp.server.fastmcp anymore as requested, just regular python functions
 
@@ -151,7 +154,7 @@ def save_rule(
             dq_type
         )
         VALUES(
-            %s,%s,%s,%s,%s,%s,'llama-agent',%s
+            %s,%s,%s,%s,%s,%s,'agent 1',%s
         )
     """,
     (
@@ -186,7 +189,7 @@ def save_rules_bulk(rules_json: str):
                 dq_type
             )
             VALUES(
-                %s,%s,%s,%s,%s,%s,'llama-agent',%s
+                %s,%s,%s,%s,%s,%s,'agent 1',%s
             )
         """,
         (

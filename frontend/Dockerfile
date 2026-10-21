@@ -1,18 +1,6 @@
 # Use an official Node.js runtime as a parent image
 FROM node:20-bullseye-slim
 
-# Install Python and pip (required for trigger.py)
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Alias python to python3
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# Install boto3 globally for the trigger script
-RUN pip3 install boto3
-
 # Set the working directory in the container
 WORKDIR /app
 

@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { middlewareApi } from '@/lib/middleware-client';
 
 export default function DatabaseNavigator() {
   const [database, setDatabase] = useState({});
@@ -23,15 +24,18 @@ export default function DatabaseNavigator() {
   async function fetchDatabase() {
     setLoading(true);
     try {
-      const res = await fetch('/api/database');
-      const data = await res.json();
-      
-      if (data.status === 'success') {
-        setDatabase(data.data);
+      const res = await middlewareApi.getDatabaseProfiles();
+      if (res.status === 'success') {
+        setDatabase(res.data || {});
+        setError(null);
+      } else if (res.status === 'db_offline') {
+        setError(res.message || "AWS RDS PostgreSQL is currently unreachable. Please check RDS Security Group port 5432.");
+        setDatabase({});
       } else {
-        setError(data.message);
+        setError(res.message);
       }
     } catch (err) {
+      console.warn("Could not fetch database profiles:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -50,7 +54,7 @@ export default function DatabaseNavigator() {
     setSelectedTableForInsert(tableName);
     // Initialize form data based on columns
     const initialData = {};
-    database[tableName].forEach(col => {
+    database[tableName]?.forEach(col => {
       initialData[col.column_name] = '';
     });
     setFormData(initialData);
@@ -73,21 +77,12 @@ export default function DatabaseNavigator() {
     setSubmitSuccess(false);
 
     try {
-      const res = await fetch('/api/database/insert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tableName: selectedTableForInsert,
-          payload: formData
-        })
-      });
-
-      const data = await res.json();
-      if (data.status === 'success') {
+      const res = await middlewareApi.insertTestRecord(selectedTableForInsert, formData);
+      if (res.status === 'success') {
         setSubmitSuccess(true);
         setTimeout(() => setIsModalOpen(false), 1500);
       } else {
-        setSubmitError(data.message);
+        setSubmitError(res.message);
       }
     } catch (err) {
       setSubmitError(err.message);

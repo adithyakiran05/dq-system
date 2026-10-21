@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { middlewareApi } from '@/lib/middleware-client';
 
 export default function Home() {
   const [rules, setRules] = useState([]);
@@ -16,11 +17,10 @@ export default function Home() {
   const fetchRules = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const res = await fetch('/api/rules');
-      const data = await res.json();
-      setRules(data.data || []);
+      const res = await middlewareApi.getProposedRules();
+      setRules(res.data || []);
     } catch (e) {
-      console.error(e);
+      console.warn("Could not fetch rules:", e);
     } finally {
       if (!isBackground) setLoading(false);
     }
@@ -28,11 +28,10 @@ export default function Home() {
 
   const fetchConfigs = async () => {
     try {
-      const res = await fetch('/api/configs/list');
-      const data = await res.json();
-      setConfigs(data.data || []);
+      const res = await middlewareApi.getConfigs();
+      setConfigs(res.data || []);
     } catch (e) {
-      console.error(e);
+      console.warn("Could not fetch configs:", e);
     }
   };
 
@@ -40,11 +39,12 @@ export default function Home() {
     fetchRules();
     fetchConfigs();
     
-    // Poll every 5 seconds for real-time updates from AgentCore
+    // Background polling: sync every 20s when visible
     const interval = setInterval(() => {
-      fetchRules(true);
-      fetchConfigs();
-    }, 5000);
+      if (!document.hidden) {
+        fetchConfigs();
+      }
+    }, 20000);
     
     return () => clearInterval(interval);
   }, []);
@@ -62,18 +62,9 @@ export default function Home() {
           throw new Error("Only PDF and TXT files are supported");
         }
         
-        // 1. Get Presigned URL
-        const presignRes = await fetch(process.env.NEXT_PUBLIC_PRESIGNED_URL_API || 'http://localhost:8000/presigned', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: selectedFile.name,
-            contentType: selectedFile.type
-          })
-        });
-        
-        if (!presignRes.ok) throw new Error("Failed to get presigned URL");
-        const { url } = await presignRes.json();
+        // 1. Get Presigned URL directly from Middleware
+        const presignRes = await middlewareApi.getPresignedUrl(selectedFile.name, selectedFile.type);
+        const { url } = presignRes.data;
         
         // 2. Upload directly to S3
         const uploadRes = await fetch(url, {
@@ -85,95 +76,92 @@ export default function Home() {
         });
         
         if (!uploadRes.ok) throw new Error("Failed to upload to S3");
+        setSavingConfig(false);
         alert("File uploaded successfully! Processing will happen in the background.");
         setSelectedFile(null);
-        setTimeout(fetchConfigs, 3000); // Wait for Lambda to process
+        setTimeout(fetchConfigs, 3000); // Wait for processing
         
       } else {
-        // Plain text flow directly to Lambda
-        const res = await fetch(process.env.NEXT_PUBLIC_PROCESSOR_API || '/api/configs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ config_text: customConfigText })
-        });
-        if (!res.ok) throw new Error("Failed to save configs");
-        alert("Custom configurations saved successfully!");
+        // Plain text flow via Middleware
+        await middlewareApi.saveConfig(customConfigText);
+        setSavingConfig(false);
         setCustomConfigText('');
         fetchConfigs();
+        alert("Custom configurations saved successfully!");
       }
     } catch (e) {
-      console.error(e);
-      alert("Error saving configs: " + e.message);
-    } finally {
+      console.warn("Save config error:", e);
       setSavingConfig(false);
+      alert("Error saving configs: " + e.message);
     }
   };
 
   const handleDeleteConfig = async (id) => {
     if (!confirm("Are you sure you want to delete this configuration?")) return;
     try {
-      await fetch('/api/configs/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config_id: id })
-      });
+      setConfigs(prev => prev.filter(c => c.id !== id));
+      await middlewareApi.deleteConfig(id);
       fetchConfigs();
     } catch (e) {
-      console.error("Failed to delete config:", e);
+      console.warn("Failed to delete config:", e);
     }
   };
 
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const res = await fetch('/api/trigger', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Failed to trigger");
-      }
-      alert("Generation started in AWS Agentcore! Rules will appear here shortly.");
-    } catch (e) {
-      console.error(e);
-      alert("Failed to start generation: " + e.message);
-    } finally {
+      await middlewareApi.triggerAgent();
       setGenerating(false);
+      alert("Generation started in AWS AgentCore via Middleware! Rules will appear here shortly.");
+    } catch (e) {
+      console.warn("Generate error:", e);
+      setGenerating(false);
+      alert("Failed to start generation: " + e.message);
     }
   };
 
   const handleApprove = async (id) => {
-    await fetch('/api/rules/approve', {
-      method: 'POST',
-      body: JSON.stringify({ rule_id: id }),
-    });
-    fetchRules();
+    setRules(prev => prev.filter(r => r.id !== id));
+    try {
+      await middlewareApi.approveRule(id);
+    } catch (e) {
+      console.warn("Approve error:", e);
+      fetchRules(true);
+    }
   };
 
   const handleReject = async (id) => {
-    await fetch('/api/rules/reject', {
-      method: 'POST',
-      body: JSON.stringify({ rule_id: id }),
-    });
-    fetchRules();
+    setRules(prev => prev.filter(r => r.id !== id));
+    try {
+      await middlewareApi.rejectRule(id);
+    } catch (e) {
+      console.warn("Reject error:", e);
+      fetchRules(true);
+    }
   };
 
   const handleApproveAll = async () => {
     const ids = filteredRules.map(r => r.id);
     if (!ids.length) return;
-    await fetch('/api/rules/approve-all', {
-      method: 'POST',
-      body: JSON.stringify({ rule_ids: ids }),
-    });
-    fetchRules();
+    setRules(prev => prev.filter(r => !ids.includes(r.id)));
+    try {
+      await middlewareApi.approveAllRules(ids);
+    } catch (e) {
+      console.warn("Approve all error:", e);
+      fetchRules(true);
+    }
   };
 
   const handleRejectAll = async () => {
     const ids = filteredRules.map(r => r.id);
     if (!ids.length) return;
-    await fetch('/api/rules/reject-all', {
-      method: 'POST',
-      body: JSON.stringify({ rule_ids: ids }),
-    });
-    fetchRules();
+    setRules(prev => prev.filter(r => !ids.includes(r.id)));
+    try {
+      await middlewareApi.rejectAllRules(ids);
+    } catch (e) {
+      console.warn("Reject all error:", e);
+      fetchRules(true);
+    }
   };
 
   // Derive unique DQ types for the filter dropdown

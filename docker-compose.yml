@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------------
+  # 1. Standalone Middleware Service (Port 8000)
+  # Acts as the middle-tier API Gateway, Auth/Tenant resolver, and AWS adapter
+  # -------------------------------------------------------------------------
+  middleware:
+    build:
+      context: ./middleware
+      dockerfile: Dockerfile
+    container_name: dq-middleware
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - ENVIRONMENT=production
+      - DB_HOST=${DB_HOST:-dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-postgres}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-YourPassword123!}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-dq-custom-configs-bucket-1696417599}
+      - LAMBDA_PROFILER_NAME=${LAMBDA_PROFILER_NAME:-lambda-profiler}
+      - LAMBDA_CHECKER_NAME=${LAMBDA_CHECKER_NAME:-lambda-checker}
+      - LAMBDA_AGENT_TRIGGER_NAME=${LAMBDA_AGENT_TRIGGER_NAME:-lambda-orchestrator-trigger}
+      - NEXT_PUBLIC_TRIGGER_API_URL=${NEXT_PUBLIC_TRIGGER_API_URL:-https://5hw2dmjup9.execute-api.us-east-1.amazonaws.com/orchestrator}
+      - REQUIRE_AUTH=false
+      - DEFAULT_TENANT_ID=default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # -------------------------------------------------------------------------
+  # 2. Next.js Frontend Container (Port 3000)
+  # Pure UI application communicating with the Standalone Middleware
+  # -------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dq-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_MIDDLEWARE_URL=http://localhost:8000
+    depends_on:
+      middleware:
+        condition: service_healthy

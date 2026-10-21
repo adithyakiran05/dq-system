@@ -186,7 +186,7 @@ def save_profile(conn, profile):
         %s,%s,
         %s,%s,
         %s
-    )
+    ) ON CONFLICT (table_name, column_name) DO NOTHING
     """
 
     cur = conn.cursor()

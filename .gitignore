@@ -21,9 +21,15 @@ node_modules/
 npm-debug.log
 yarn-error.log
 dist/
-build/
+# Environment and local configs
 .env
+.env.*
 .env.local
+!.env.example
+
+# Unignore frontend lib directory
+!frontend/src/lib/
+!frontend/src/lib/**
 
 # Python
 __pycache__/
@@ -32,14 +38,10 @@ __pycache__/
 *.so
 .Python
 env/
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -53,6 +55,10 @@ venv/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Scratch & temporary test files
+payload.json
+response.json
 
 # Java / Maven / Gradle
 *.class

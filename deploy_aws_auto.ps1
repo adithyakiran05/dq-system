@@ -3,7 +3,7 @@ $env:AWS_DEFAULT_REGION = "us-east-1"
 
 $AccountId = (aws sts get-caller-identity --query Account --output text)
 $Region = "us-east-1"
-$BucketName = "dq-custom-configs-bucket-1696417599"
+$BucketName = "dq-custom-configs-bucket-$AccountId"
 
 Write-Host "1. Creating IAM Role..."
 $TrustPolicy = @"
@@ -64,7 +64,7 @@ try {
 }
 
 # Config Processor Lambda
-$DbHost = "postgres.cqbucwq2y92h.us-east-1.rds.amazonaws.com"
+$DbHost = "dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com"
 $DbPort = "5432"
 $DbName = "postgres"
 $DbUser = "postgres"

@@ -36,6 +36,7 @@ def process_profiles_background(profiles_list, system_prompt):
         retries = 3
         while retries > 0:
             try:
+                print(f"Starting batch {batches.index(batch) + 1}/{len(batches)}")
                 chat_completion = client.chat.completions.create(
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -46,6 +47,7 @@ def process_profiles_background(profiles_list, system_prompt):
                 )
                 
                 generated_rules_json = chat_completion.choices[0].message.content
+                print(f"Got response for batch {batches.index(batch) + 1}")
                 
                 # Clean up any potential markdown formatting the LLM might add
                 if generated_rules_json.startswith("```"):
@@ -145,6 +147,11 @@ async def generate_rules(background_tasks: BackgroundTasks):
            - "Accuracy" (for min_value, max_value)
            - "Consistency" (if a column ends in _id and implies a relationship)
            - "Timeliness" (for freshness on updated_at/created_at timestamps)
+        
+        CRITICAL: YOU MUST GENERATE RULES FOR ALL TYPES OF COLUMNS!
+        - For NUMERIC columns (int, float, numeric), you MUST generate min_value or max_value rules if possible.
+        - For STRING/TEXT columns (varchar, text), you MUST generate length checks (min_length, max_length) or regex_match.
+        - Do NOT just generate rules for _id columns. You must analyze EVERY column in the batch.
         
         Return ONLY a raw JSON array matching this exact schema:
         [

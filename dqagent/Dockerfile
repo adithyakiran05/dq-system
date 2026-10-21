@@ -9,5 +9,4 @@ COPY . .
 
 # AgentCore requires the web server to listen on port 8080 by default (or as configured)
 EXPOSE 8080
-
-CMD ["python", "agent_hybrid.py"]
+CMD ["python", "agent.py"]
