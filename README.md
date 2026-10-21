@@ -62,7 +62,7 @@ The system is built on a **decoupled 3-tier microservice architecture**, isolati
   - **AWS SDK Integration ([`aws_service.py`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/app/services/aws_service.py))**: Generates S3 presigned PUT URLs and invokes Lambda functions asynchronously.
 
 ### 3. Database Layer (PostgreSQL on Amazon RDS)
-- **Host**: `dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com:5432`
+- **Engine**: Amazon RDS (PostgreSQL 15+)
 - **Core Tables**:
   - `dq_profiles`: Statistical profiling data for every monitored table and column (nulls, distinct values, min/max bounds, averages, string lengths, sample distributions).
   - `dq_custom_configs`: Active domain constraints parsed from uploaded PDFs or entered manually.
@@ -178,14 +178,14 @@ HOST=0.0.0.0
 PORT=8000
 ENVIRONMENT=development
 
-DB_HOST=dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com
+DB_HOST=your-rds-endpoint.amazonaws.com
 DB_PORT=5432
 DB_NAME=postgres
 DB_USER=postgres
-DB_PASSWORD=YourPassword123!
+DB_PASSWORD=your-db-password
 
 AWS_REGION=us-east-1
-S3_BUCKET_NAME=dq-custom-configs-bucket-233250434692
+S3_BUCKET_NAME=your-s3-bucket-name
 LAMBDA_PROFILER_NAME=lambda-profiler
 LAMBDA_CHECKER_NAME=lambda-checker
 LAMBDA_AGENT_TRIGGER_NAME=lambda-orchestrator-trigger

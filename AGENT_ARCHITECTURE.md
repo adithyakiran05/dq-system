@@ -46,14 +46,14 @@ This script will:
 - Authenticate Docker with your AWS ECR registry.
 - Build the Docker image based on the `Dockerfile`.
 - Tag it as `latest`.
-- Push it to your ECR repository (`413612133806.dkr.ecr.us-east-1.amazonaws.com/dq-agent-runtime`).
+- Push it to your ECR repository (`<your-account-id>.dkr.ecr.<region>.amazonaws.com/dq-agent-runtime`).
 
 ### Step 2: Update AWS Bedrock Runtime
 AWS Bedrock **caches** container images. Pushing a new image to ECR with the `latest` tag does **not** automatically update the running agent.
 
 1. Go to the **AWS ECR Console**. Find the newly pushed image and copy its exact **Image URI with the SHA digest** (e.g., `.../dq-agent-runtime@sha256:12345...`).
 2. Go to the **AWS Bedrock Console**.
-3. Navigate to your Custom Agent (`dq_agent-VW5g8m2yNy`).
+3. Navigate to your Custom Agent (`<your-agent-id>`).
 4. Edit the **Agent Runtime** settings.
 5. Replace the Image URI with the newly copied URI containing the SHA digest.
 6. Click **Update Runtime Version**.

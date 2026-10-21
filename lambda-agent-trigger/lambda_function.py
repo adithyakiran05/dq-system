@@ -5,8 +5,9 @@ import boto3
 def lambda_handler(event, context):
     print("Executing Simple Agent Trigger...")
     try:
-        client = boto3.client('bedrock-agentcore', region_name='us-east-1')
-        agent_arn = os.environ.get("AGENT_ARN", "arn:aws:bedrock-agentcore:us-east-1:413612133806:runtime/dq_agent-VW5g8m2yNy")
+        agent_arn = os.environ.get("AGENT_ARN")
+        if not agent_arn:
+            raise ValueError("AGENT_ARN environment variable is not configured")
         
         # We pass the payload instructing the agent to start generating rules
         response = client.invoke_agent_runtime(

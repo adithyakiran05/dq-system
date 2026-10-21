@@ -14,13 +14,13 @@ cd ..
 Write-Host "3. Deploying Orchestrator Lambda..."
 $RoleArn = (aws iam get-role --role-name dq-custom-config-lambda-role --query Role.Arn --output text)
 
-$DbHost = "dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com"
-$DbPort = "5432"
-$DbName = "postgres"
-$DbUser = "postgres"
-$DbPassword = "YourPassword123!"
-$Agent1Arn = "arn:aws:bedrock-agentcore:us-east-1:233250434692:runtime/agent_llm-2ZOcGOBtVP"
-$Agent2Arn = "arn:aws:bedrock-agentcore:us-east-1:233250434692:runtime/agent2-PWzeLa2Ae6"
+$DbHost = if ($env:DB_HOST) { $env:DB_HOST } else { "your-rds-endpoint.amazonaws.com" }
+$DbPort = if ($env:DB_PORT) { $env:DB_PORT } else { "5432" }
+$DbName = if ($env:DB_NAME) { $env:DB_NAME } else { "postgres" }
+$DbUser = if ($env:DB_USER) { $env:DB_USER } else { "postgres" }
+$DbPassword = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { "your-db-password" }
+$Agent1Arn = if ($env:AGENT_1_ARN) { $env:AGENT_1_ARN } else { "arn:aws:bedrock-agentcore:${Region}:${AccountId}:runtime/agent_1" }
+$Agent2Arn = if ($env:AGENT_2_ARN) { $env:AGENT_2_ARN } else { "arn:aws:bedrock-agentcore:${Region}:${AccountId}:runtime/agent_2" }
 
 try {
     aws lambda create-function --function-name lambda-orchestrator-trigger `

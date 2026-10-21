@@ -75,7 +75,8 @@ if __name__ == '__main__':
         
     db_host = sys.argv[1]
     
-    conn = connect(db_host, 'postgres', 'YourPassword123!', 'postgres')
+    db_password = os.getenv("DB_PASSWORD", "")
+    conn = connect(db_host, os.getenv("DB_USER", "postgres"), db_password, os.getenv("DB_NAME", "postgres"))
     
     run_script(conn, 'pagila-schema.sql')
     run_script(conn, 'pagila-data.sql')
