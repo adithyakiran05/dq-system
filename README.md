@@ -1,74 +1,200 @@
-# Data Quality (DQ) Automation System
+# Autonomous Data Quality (DQ) Management Platform
 
-## Overview
-This repository contains a full-stack, AI-augmented Data Quality Automation Pipeline. The system is designed to automatically profile database tables, generate intelligent data quality rules using Machine Learning and LLM Agents, and monitor databases for rule violations.
-
-## Architecture Components
-
-1. **Frontend (`frontend/`)**: A Next.js/React web application that visualizes the data quality metrics, displays proposed rules, and highlights data violations. It also includes an interface for managing **Custom Configurations**.
-2. **Lambda Profiler (`lambda-profiler/`)**: An AWS Lambda function that scans your PostgreSQL database to generate statistical profiles (null rates, distinct counts, max/min values, etc.) and saves them to the `dq_profiles` table.
-3. **Lambda Checker (`lambda-checker/`)**: An AWS Lambda function that validates actual database data against the accepted rules to find anomalies.
-4. **Lambda Config Processor (`lambda-config-processor/`)**: An AWS Lambda function triggered by S3 uploads. It parses uploaded custom configuration files (like PDF and TXT), extracts the raw text, and stores it in the `dq_custom_configs` table in RDS.
-5. **Machine Learning Pipelines (`ml-randomforest/`, `ml-xgboost/`)**: ML models that detect complex anomalies based on historical profiling data.
-6. **DQ Agent (`dqagent/`)**: A containerized LLM Agent service (powered by Groq / Llama 3) that reads database profiles, injects any active **Custom Configurations** into its system prompt, and automatically generates natural-language driven rules, saving them as proposals to the `dq_rules_proposed` table.
+An enterprise-grade, AI-augmented Data Quality Automation Platform that autonomously profiles relational databases, ingests unstructured domain business constraints, generates statistical & LLM-driven quality rules, and monitors databases for anomalies in real time.
 
 ---
 
-## The Custom Configurations Pipeline
+## Architecture Overview
 
-To ensure the AI generates rules that strictly align with domain-specific business constraints (e.g., "All shipping IDs must be 10 characters long"), users can upload custom configurations through the frontend.
+The system is built on a **decoupled 3-tier microservice architecture**, isolating the client presentation layer from cloud infrastructure and database engines via a dedicated middle-tier API Gateway.
 
-1. **Uploads**: The Next.js frontend uses AWS pre-signed URLs to upload PDF or TXT files directly to an S3 bucket (`dq-custom-configs-bucket-1696417599`).
-2. **Processing**: S3 triggers the `lambda-config-processor`, running Python 3.12. It extracts the raw text from the files using PyPDF2 or plain text decoders and inserts it into the `dq_custom_configs` RDS table via `pg8000`.
-3. **Agent Integration**: When the `dqagent` runs, it dynamically fetches all active configurations from the `dq_custom_configs` table, concatenates them, and injects them directly into the agent's system prompt to enforce strict business logic during generation.
-4. **Management UI**: Users can view and delete active configurations directly from the frontend via Next.js API routes (`/api/configs/list` and `/api/configs/delete`), reusing the same RDS connection pool as the rule management system.
-
----
-
-## Deploying the DQ Agent to AWS Bedrock AgentCore
-
-The `dqagent` is built to run on the AWS AgentCore runtime. Because AgentCore has strict timeout limits, the agent uses a lightweight FastAPI server that instantly responds with an HTTP 200 Success status and offloads the heavy LLM generation to a background thread.
-
-### 1. Build and Push the Docker Image
-AgentCore requires a `linux/arm64` container image (for AWS Graviton compatibility). From your machine, use Docker Buildx to cross-compile and push the image to AWS ECR:
-
-```bash
-# Navigate to the agent directory
-cd dqagent
-
-# Authenticate with your AWS ECR
-aws ecr get-login-password --region <YOUR-REGION> | docker login --username AWS --password-stdin <YOUR-ACCOUNT-ID>.dkr.ecr.<YOUR-REGION>.amazonaws.com
-
-# Build the ARM64 image (bypass Windows/WSL NVIDIA bugs by using a clean builder if necessary)
-docker buildx build --platform linux/arm64 -t dq-agent-runtime . --load
-
-# Tag and Push to ECR
-docker tag dq-agent-runtime:latest <YOUR-ACCOUNT-ID>.dkr.ecr.<YOUR-REGION>.amazonaws.com/dq-agent-runtime:latest
-docker push <YOUR-ACCOUNT-ID>.dkr.ecr.<YOUR-REGION>.amazonaws.com/dq-agent-runtime:latest
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        TIER 1: CLIENT FRONTEND                         │
+│   Next.js 16 (App Router) + React + Tailwind CSS (Port 3000)           │
+│   • 0ms Optimistic UI updates      • Pure HTTP via middlewareApi       │
+│   • Responsive Analytics UI        • Zero direct database drivers      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (HTTP REST / X-Tenant-ID)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                   TIER 2: STANDALONE MIDDLEWARE                        │
+│   FastAPI Middle-Tier Ingress Gateway (Port 8000)                      │
+│   • Multi-Tenant & JWT Auth        • Worker ThreadPool Dispatch        │
+│   • Connection Pool (autocommit)   • AWS Boto3 SDK Cloud Adapter       │
+│   • Latency Timing Headers         • CORS Preflight Bypass             │
+└───────┬───────────────────────────┬────────────────────────────┬───────┘
+        │                           │                            │
+        ▼                           ▼                            ▼
+┌──────────────────┐      ┌──────────────────┐        ┌──────────────────┐
+│  RDS PostgreSQL  │      │  AWS Cloud Infra │        │ Bedrock / Agent  │
+│  (Port 5432)     │      │  • S3 Buckets    │        │  • AgentCore     │
+│  • dq_profiles   │      │  • lambda-prof   │        │  • Groq Cloud    │
+│  • dq_rules      │      │  • lambda-check  │        │  • LLM Inference │
+│  • dq_violations │      │  • lambda-config │        │  • BackgroundTask│
+└──────────────────┘      └──────────────────┘        └──────────────────┘
 ```
 
-### 2. Configure AWS AgentCore Runtime
-Once the image is in ECR, navigate to the **AWS Bedrock AgentCore** console and create a new runtime with the following settings:
-- **Architecture**: `ARM64`
-- **Container Image URI**: `<YOUR-ACCOUNT-ID>.dkr.ecr.<YOUR-REGION>.amazonaws.com/dq-agent-runtime:latest`
-- **Protocol**: `HTTP`
-- **Port Mapping**: `8080` (This is exposed by the FastAPI `uvicorn` server)
+> [!NOTE]
+> For in-depth technical specifications, sequence diagrams, and database entity relationships, refer to the [System Architecture Guide](file:///c:/Users/Adithya/Desktop/dq-system/docs/SYSTEM_ARCHITECTURE.md).
 
-### 3. Environment Variables
-Add the following key-value pairs in the AgentCore runtime configuration so the agent can authenticate with Groq and your PostgreSQL database:
-- `GROQ_API_KEY`: Your Groq API key (e.g., `gsk_...`)
-- `DB_HOST`: Your RDS PostgreSQL endpoint
-- `DB_PORT`: `5432`
-- `DB_NAME`: Your database name
-- `DB_USER`: Your database username
-- `DB_PASSWORD`: Your database password
+---
 
-### 4. The Trigger Architecture (Frontend to AgentCore)
-To allow the Next.js frontend to securely trigger the AgentCore runtime without exposing AWS credentials, we use a lightweight Lambda function (`lambda-agent-trigger/lambda_function.py`) as a secure bridge.
+## Component Deep Dive
 
-1. **Frontend:** Hits an AWS API Gateway endpoint (`NEXT_PUBLIC_TRIGGER_API_URL` in `.env.local`).
-2. **API Gateway:** Routes the request to the `dq-agent-trigger` Lambda function.
-3. **Lambda Trigger:** Uses the `boto3` SDK to assume its IAM role and invoke the Bedrock AgentCore runtime securely, bypassing complex Signature V4 authentication requirements.
-4. **AgentCore:** Wakes up the `dqagent` runtime container via the `POST /invocations` route.
+### 1. Frontend Client ([`frontend/`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/))
+- **Framework**: Next.js 16 (Turbopack) with React 19 and Tailwind CSS.
+- **Port**: `3000`
+- **Key Modules**:
+  - [`frontend/src/app/page.js`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/src/app/page.js): **Data Health Dashboard** displaying global health scores, table anomaly distributions, and direct controls to run compliance checks.
+  - [`frontend/src/app/rules/page.js`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/src/app/rules/page.js): **DQ Rules Review Console** supporting rule filtering, single/batch approval/rejection with **0ms optimistic updates**, parameterization modal, generation history, and trigger buttons.
+  - [`frontend/src/app/configs/page.js`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/src/app/configs/page.js): **Business Rules Manager** for uploading unstructured documentation (PDF/TXT) or entering manual business rules.
+  - [`frontend/src/app/database/page.js`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/src/app/database/page.js): **Database Schema Explorer** inspecting table profiles, column statistical distributions, and inserting test payloads.
+  - [`frontend/src/lib/middleware-client.js`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/src/lib/middleware-client.js): Unified API client handling all requests to the Middleware.
 
-*Note: The agent processes profiles in optimized chunk sizes (e.g., batches of 6) and includes an exponential backoff retry mechanism (15-second pauses) to avoid strict Tokens-Per-Minute rate limits on the Groq LLM API caused by the massive custom configurations payloads.*
+### 2. Standalone Middleware ([`middleware/`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/))
+- **Framework**: FastAPI + Uvicorn + Starlette.
+- **Port**: `8000`
+- **Key Capabilities**:
+  - **High-Performance Connection Pool ([`connection.py`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/app/db/connection.py))**: Maintains warm `pg8000` sockets with `autocommit=True` and background pre-warming, dropping query latencies from **~2.5s down to ~0.3s**.
+  - **Thread-Pool Offloading**: Endpoints are executed in worker threads, preventing synchronous database or AWS socket I/O from freezing the FastAPI ASGI event loop.
+  - **Multi-Tenant Gateway ([`middleware.py`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/app/core/middleware.py))**: Extracts tenant IDs, times request durations, attaches telemetry headers (`X-Process-Time`, `X-Tenant-ID`), and bypasses CORS `OPTIONS` preflights.
+  - **AWS SDK Integration ([`aws_service.py`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/app/services/aws_service.py))**: Generates S3 presigned PUT URLs and invokes Lambda functions asynchronously.
+
+### 3. Database Layer (PostgreSQL on Amazon RDS)
+- **Host**: `dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com:5432`
+- **Core Tables**:
+  - `dq_profiles`: Statistical profiling data for every monitored table and column (nulls, distinct values, min/max bounds, averages, string lengths, sample distributions).
+  - `dq_custom_configs`: Active domain constraints parsed from uploaded PDFs or entered manually.
+  - `dq_rules_proposed`: Candidate rules generated by AI agents awaiting human review.
+  - `dq_rules`: Approved production rules evaluated by the anomaly detection engine.
+  - `dq_violations`: Real-time anomaly logs capturing rule infractions and offending values.
+  - **Sample Target**: Pagila relational database (`actor`, `film`, `customer`, `payment`, `rental`, `inventory`).
+
+### 4. Cloud Serverless Suite (AWS Lambda)
+- **`lambda-profiler`** ([`lambda-profiler/`](file:///c:/Users/Adithya/Desktop/dq-system/lambda-profiler/)): Scans relational tables in PostgreSQL, computes column statistics, and updates `dq_profiles`.
+- **`lambda-checker`** ([`lambda-checker/`](file:///c:/Users/Adithya/Desktop/dq-system/lambda-checker/)): Audits active database records against approved `dq_rules` and writes anomalies to `dq_violations`.
+- **`lambda-config-processor`** ([`lambda-config-processor/`](file:///c:/Users/Adithya/Desktop/dq-system/lambda-config-processor/)): Triggered automatically by S3 `s3:ObjectCreated:*` events. Extracts text from PDF documents using `PyPDF2` and persists raw text to `dq_custom_configs`.
+- **`lambda-orchestrator-trigger`** ([`lambda-orchestrator-trigger/`](file:///c:/Users/Adithya/Desktop/dq-system/lambda-orchestrator-trigger/)): Secure bridge that assumes an IAM role to trigger the AWS Bedrock AgentCore runtime.
+
+### 5. AI Agentic Rule Generation Engine
+- **AWS Bedrock AgentCore**: Hosts the `dqagent` containerized runtime (`dqagent/Dockerfile`).
+- **Anti-Timeout Pattern**: Returns HTTP 200 immediately to AWS Bedrock to satisfy the 29-second gateway timeout, delegating the heavy rule generation loop to a FastAPI `BackgroundTask`.
+- **Groq LLM**: Queries fast inference models (such as `qwen/qwen3.8-27b`) with profile batches and custom business constraints to generate structured rule schemas.
+
+---
+
+## Core System Workflows
+
+### 1. Statistical Profiling
+```
+User clicks "Run Profiler"
+  │
+  ▼
+Next.js UI ──POST /api/v1/triggers/profiler──► Middleware ──boto3 (async)──► lambda-profiler
+                                                                                   │
+                                  Amazon RDS (dq_profiles) ◄──Writes statistics────┘
+```
+
+### 2. Business Constraint Ingestion (PDF / Text)
+```
+User uploads requirements PDF (e.g. shipping_rules.pdf)
+  │
+  ▼
+Next.js UI ──POST /api/v1/configs/presigned-url──► Middleware (Returns signed S3 PUT URL)
+  │
+  ▼ (Direct binary upload)
+Amazon S3 Bucket ──s3:ObjectCreated:* Event──► lambda-config-processor
+                                                        │ (PyPDF2 Text Extraction)
+                                                        ▼
+                                             Amazon RDS (dq_custom_configs)
+```
+
+### 3. Rule Review & Approval (Zero UI Latency)
+```
+User clicks "Approve All"
+  │
+  ├─► [Instant 0ms Optimistic UI Update: items vanish immediately from table]
+  │
+  ▼ (Background REST call)
+Next.js UI ──POST /api/v1/rules/approve-all──► Middleware (DatabaseConnectionPool)
+                                                        │
+                                                        ▼ (Single atomic SQL query)
+                                             Amazon RDS (INSERT INTO dq_rules SELECT...)
+```
+
+---
+
+## Quick Start & Running Locally
+
+### Option A: Multi-Container Setup (Docker Compose)
+Run both the Next.js Frontend and FastAPI Middleware as isolated containers:
+
+```bash
+docker-compose up --build
+```
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Middleware**: [http://localhost:8000](http://localhost:8000)
+- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+### Option B: Native Development Setup
+
+#### 1. Start the Middleware
+```bash
+cd middleware
+pip install -r requirements.txt
+python run.py
+```
+
+#### 2. Start the Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+## Key Performance Optimizations
+
+1. **Persistent Connection Pooling**:
+   Eliminates TCP and TLS handshakes to AWS `us-east-1` on every request. Reusing warm sockets with `autocommit=True` reduced query latency from **2.52s to 0.34s** (**6.5x faster**).
+2. **FastAPI Multi-Threaded Dispatch**:
+   All database endpoints are standard synchronous functions (`def`), allowing Starlette to dispatch them onto worker threads. Concurrent polling and button clicks never freeze the event loop.
+3. **0ms Optimistic UI Updates**:
+   Rule approve/reject actions filter the local React state instantly. Database set operations (`WHERE id IN (...)`) execute asynchronously in the background.
+4. **Adaptive Background Polling**:
+   Background syncing operates on a relaxed 15-second timer and automatically sleeps when the browser tab is hidden (`document.hidden`). Generation history and custom configuration panels load on-demand when activated.
+
+---
+
+## Environment Variables Reference
+
+### Middleware ([`middleware/.env.example`](file:///c:/Users/Adithya/Desktop/dq-system/middleware/.env.example))
+```ini
+HOST=0.0.0.0
+PORT=8000
+ENVIRONMENT=development
+
+DB_HOST=dq-database.c8bw22guwzeh.us-east-1.rds.amazonaws.com
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=postgres
+DB_PASSWORD=YourPassword123!
+
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=dq-custom-configs-bucket-233250434692
+LAMBDA_PROFILER_NAME=lambda-profiler
+LAMBDA_CHECKER_NAME=lambda-checker
+LAMBDA_AGENT_TRIGGER_NAME=lambda-orchestrator-trigger
+
+REQUIRE_AUTH=false
+DEFAULT_TENANT_ID=default
+```
+
+### Frontend ([`frontend/.env.local`](file:///c:/Users/Adithya/Desktop/dq-system/frontend/.env.local))
+```ini
+NEXT_PUBLIC_MIDDLEWARE_URL=http://localhost:8000
+```

@@ -59,7 +59,20 @@ All application endpoints are served under `/api/v1`:
 
 ---
 
-## 3. Running Locally
+## 3. High-Performance Architecture
+
+### Connection Pooling (`app/db/connection.py`)
+- **Persistent Socket Reuse**: Keeps a FIFO queue of active `pg8000` connections to Amazon RDS, eliminating the 2.5s TCP+TLS handshake latency on every request.
+- **`autocommit = True`**: Eliminates transcontinental `BEGIN` and `COMMIT` roundtrips over WAN, enabling PostgreSQL single-statement execution in a single roundtrip (~0.3s).
+- **Idle Recycling & Pre-warming**: Recycles connections idle for >120s and pre-warms 3 connections at application startup using FastAPI's `lifespan` hook.
+
+### Multi-Threaded Execution
+- All database and Boto3 endpoints are declared as standard synchronous functions (`def`), causing FastAPI to execute them in Starlette's `ThreadPoolExecutor`.
+- The ASGI event loop is never blocked by socket I/O, allowing concurrent requests, health checks, and preflights to be processed in parallel.
+
+---
+
+## 4. Running Locally
 
 ### Prerequisites
 * Python 3.11+
@@ -76,7 +89,7 @@ The server will start on `http://localhost:8000`. You can test every endpoint di
 
 ---
 
-## 4. Running with Docker
+## 5. Running with Docker
 
 ### Build the Container
 ```bash
